@@ -1,0 +1,210 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local SETTINGS = {
+    Box = true,
+    Skeleton = true,
+    Tracer = true,
+    Names = true,
+    Health = true,
+    Level = true,
+    Distance = true,
+    TeamCheck = true,
+    Colors = {
+        Pirate = Color3.fromRGB(255, 40, 40),
+        Marine = Color3.fromRGB(40, 120, 255),
+        Level = Color3.fromRGB(255, 255, 0), -- Yellow
+        Neutral = Color3.fromRGB(255, 255, 255)
+    }
+}
+
+local function CreateDrawing(type, props)
+    local d = Drawing.new(type)
+    for i, v in pairs(props) do d[i] = v end
+    return d
+end
+
+local function GetPlayerColor(player)
+    if player.Team then
+        local name = player.Team.Name:lower()
+        if name:find("pirate") then return SETTINGS.Colors.Pirate end
+        if name:find("marine") then return SETTINGS.Colors.Marine end
+    end
+    return SETTINGS.Colors.Neutral
+end
+
+local function GetLevel(player)
+    local data = player:FindFirstChild("Data")
+    local level = data and data:FindFirstChild("Level")
+    return level and tostring(level.Value) or "0"
+end
+
+local PlayerESP = {}
+
+local function AddESP(player)
+    if player == LocalPlayer then return end
+
+    local objects = {
+        -- Box Outline (The "Stroke")
+        BoxOutline = CreateDrawing("Square", {Thickness = 3, Color = Color3.new(0,0,0), Filled = false, Visible = false, ZIndex = 1}),
+        Box = CreateDrawing("Square", {Thickness = 1, Color = Color3.new(1,1,1), Filled = false, Visible = false, ZIndex = 2}),
+        
+        -- Tracer Outline (The "Stroke")
+        TracerOutline = CreateDrawing("Line", {Thickness = 3, Color = Color3.new(0,0,0), Visible = false, ZIndex = 1}),
+        Tracer = CreateDrawing("Line", {Thickness = 1, Color = Color3.new(1,1,1), Visible = false, ZIndex = 2}),
+        
+        -- Text elements (Built-in Outline property)
+        Name = CreateDrawing("Text", {Size = 18, Center = true, Outline = true, OutlineColor = Color3.new(0,0,0), Visible = false}),
+        Dist = CreateDrawing("Text", {Size = 14, Center = true, Outline = true, OutlineColor = Color3.new(0,0,0), Visible = false}),
+        Level = CreateDrawing("Text", {Size = 15, Center = true, Outline = true, Color = SETTINGS.Colors.Level, OutlineColor = Color3.new(0,0,0), Visible = false}),
+        
+        -- Health
+        HealthOutline = CreateDrawing("Line", {Thickness = 3, Color = Color3.new(0,0,0), Visible = false}),
+        HealthBar = CreateDrawing("Line", {Thickness = 2, Color = Color3.new(0,1,0), Visible = false}),
+
+        -- Skeleton
+        Skel = {}
+    }
+
+    local joints = {"HeadToUpperTorso", "UpperTorsoToLowerTorso", "UpperTorsoToLeftArm", "UpperTorsoToRightArm", "LeftArmToLeftHand", "RightArmToRightHand", "LowerTorsoToLeftLeg", "LowerTorsoToRightLeg", "LeftLegToLeftFoot", "RightLegToRightFoot"}
+    for _, name in pairs(joints) do
+        objects.Skel[name.."_Out"] = CreateDrawing("Line", {Thickness = 3, Color = Color3.new(0,0,0), Visible = false, ZIndex = 1})
+        objects.Skel[name] = CreateDrawing("Line", {Thickness = 1, Color = Color3.new(1,1,1), Visible = false, ZIndex = 2})
+    end
+
+    PlayerESP[player] = objects
+end
+
+local function RemoveESP(player)
+    if PlayerESP[player] then
+        for _, obj in pairs(PlayerESP[player]) do
+            if type(obj) == "table" then
+                for _, sub in pairs(obj) do sub:Remove() end
+            else
+                obj:Remove()
+            end
+        end
+        PlayerESP[player] = nil
+    end
+end
+
+for _, p in pairs(Players:GetPlayers()) do AddESP(p) end
+Players.PlayerAdded:Connect(AddESP)
+Players.PlayerRemoving:Connect(RemoveESP)
+
+RunService.Heartbeat:Connect(function()
+    for player, esp in pairs(PlayerESP) do
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChild("Humanoid")
+
+        if char and root and hum and hum.Health > 0 then
+            local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+
+            if onScreen then
+                local color = GetPlayerColor(player)
+                local sizeX = 2200 / pos.Z
+                local sizeY = 3200 / pos.Z
+                local boxPos = Vector2.new(pos.X - sizeX / 2, pos.Y - sizeY / 2)
+
+                -- Box + Stroke
+                esp.Box.Visible = SETTINGS.Box
+                esp.Box.Position = boxPos
+                esp.Box.Size = Vector2.new(sizeX, sizeY)
+                esp.Box.Color = color
+
+                esp.BoxOutline.Visible = SETTINGS.Box
+                esp.BoxOutline.Position = boxPos
+                esp.BoxOutline.Size = esp.Box.Size
+
+                -- Tracer + Stroke (From Top)
+                esp.Tracer.Visible = SETTINGS.Tracer
+                esp.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, 0)
+                esp.Tracer.To = Vector2.new(pos.X, boxPos.Y)
+                esp.Tracer.Color = color
+
+                esp.TracerOutline.Visible = SETTINGS.Tracer
+                esp.TracerOutline.From = esp.Tracer.From
+                esp.TracerOutline.To = esp.Tracer.To
+
+                -- Name & Dist
+                esp.Name.Visible = SETTINGS.Names
+                esp.Name.Text = player.DisplayName or player.Name
+                esp.Name.Position = Vector2.new(pos.X, boxPos.Y - 35)
+                esp.Name.Color = color
+
+                esp.Dist.Visible = SETTINGS.Distance
+                esp.Dist.Text = "[" .. math.floor((root.Position - Camera.CFrame.Position).Magnitude) .. "m]"
+                esp.Dist.Position = Vector2.new(pos.X, boxPos.Y - 18)
+
+                -- Level
+                esp.Level.Visible = SETTINGS.Level
+                esp.Level.Text = "LEVEL " .. GetLevel(player)
+                esp.Level.Position = Vector2.new(pos.X, boxPos.Y + sizeY + 5)
+
+                -- Health
+                esp.HealthOutline.Visible = SETTINGS.Health
+                esp.HealthOutline.From = Vector2.new(boxPos.X - 6, boxPos.Y + sizeY)
+                esp.HealthOutline.To = Vector2.new(boxPos.X - 6, boxPos.Y)
+
+                esp.HealthBar.Visible = SETTINGS.Health
+                esp.HealthBar.From = Vector2.new(boxPos.X - 6, boxPos.Y + sizeY)
+                local hSize = (hum.Health / hum.MaxHealth) * sizeY
+                esp.HealthBar.To = Vector2.new(boxPos.X - 6, boxPos.Y + sizeY - hSize)
+                esp.HealthBar.Color = Color3.fromHSV(hum.Health / hum.MaxHealth * 0.3, 1, 1)
+
+                -- Skeleton Logic
+                if SETTINGS.Skeleton then
+                    local function getV(name)
+                        local p = char:FindFirstChild(name)
+                        if p then 
+                            local vPos, vis = Camera:WorldToViewportPoint(p.Position)
+                            return Vector2.new(vPos.X, vPos.Y), vis
+                        end
+                    end
+
+                    local j = {
+                        H = getV("Head"), UT = getV("UpperTorso"), LT = getV("LowerTorso"),
+                        LA = getV("LeftUpperArm"), LH = getV("LeftHand"),
+                        RA = getV("RightUpperArm"), RH = getV("RightHand"),
+                        LL = getV("LeftUpperLeg"), LF = getV("LeftFoot"),
+                        RL = getV("RightUpperLeg"), RF = getV("RightFoot")
+                    }
+
+                    local function connect(lineKey, p1, p2)
+                        if j[p1] and j[p2] then
+                            esp.Skel[lineKey].Visible = true
+                            esp.Skel[lineKey].From = j[p1]
+                            esp.Skel[lineKey].To = j[p2]
+                            esp.Skel[lineKey].Color = color
+                            -- Outline
+                            esp.Skel[lineKey.."_Out"].Visible = true
+                            esp.Skel[lineKey.."_Out"].From = j[p1]
+                            esp.Skel[lineKey.."_Out"].To = j[p2]
+                        else
+                            esp.Skel[lineKey].Visible = false
+                            esp.Skel[lineKey.."_Out"].Visible = false
+                        end
+                    end
+
+                    connect("HeadToUpperTorso", "H", "UT")
+                    connect("UpperTorsoToLowerTorso", "UT", "LT")
+                    connect("UpperTorsoToLeftArm", "UT", "LA")
+                    connect("UpperTorsoToRightArm", "UT", "RA")
+                    connect("LeftArmToLeftHand", "LA", "LH")
+                    connect("RightArmToRightHand", "RA", "RH")
+                    connect("LowerTorsoToLeftLeg", "LT", "LL")
+                    connect("LowerTorsoToRightLeg", "LT", "RL")
+                    connect("LeftLegToLeftFoot", "LL", "LF")
+                    connect("RightLegToRightFoot", "RL", "RF")
+                end
+            else
+                for _, o in pairs(esp) do if type(o) == "table" then for _, s in pairs(o) do s.Visible = false end else o.Visible = false end end
+            end
+        else
+            for _, o in pairs(esp) do if type(o) == "table" then for _, s in pairs(o) do s.Visible = false end else o.Visible = false end end
+        end
+    end
+end)
